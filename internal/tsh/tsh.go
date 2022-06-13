@@ -191,7 +191,7 @@ func handleRunShell(layer *pel.PktEncLayer, command string) {
 		return
 	}
 
-	ws_col, ws_row, _ := terminal.GetSize(0)
+	ws_col, ws_row, _ := terminal.GetSize(int(os.Stdout.Fd()))
 	ws := make([]byte, 4)
 	ws[0] = byte((ws_row >> 8) & 0xFF)
 	ws[1] = byte((ws_row) & 0xFF)
