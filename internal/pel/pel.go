@@ -130,14 +130,12 @@ func (layer *PktEncLayer) hashKey(iv []byte) []byte {
 // return err if the packet read/write operation
 // takes more than HandshakeRWTimeout (default: 3) seconds
 func (layer *PktEncLayer) Handshake(isServer bool) error {
+	timeout := time.Duration(constants.HandshakeRWTimeout) * time.Second
 	if isServer {
 		buffer := make([]byte, 40)
-		layer.conn.SetReadDeadline(
-			time.Now().Add(time.Duration(constants.HandshakeRWTimeout) * time.Second))
-		if err := layer.readConnUntil(buffer, 40); err != nil {
+		if err := layer.readConnUntilFilledTimeout(buffer, timeout); err != nil {
 			return err
 		}
-		layer.conn.SetReadDeadline(time.Time{})
 		iv1 := buffer[20:]
 		iv2 := buffer[:20]
 
@@ -154,10 +152,7 @@ func (layer *PktEncLayer) Handshake(isServer bool) error {
 		layer.recvDecrypter = cipher.NewCBCDecrypter(block, iv2[:16])
 		layer.recvHmac = hmac.New(sha1.New, key)
 
-		layer.conn.SetReadDeadline(
-			time.Now().Add(time.Duration(constants.HandshakeRWTimeout) * time.Second))
-		n, err := layer.Read(buffer[:16])
-		layer.conn.SetReadDeadline(time.Time{})
+		n, err := layer.ReadTimeout(buffer[:16], timeout)
 		if n != 16 || err != nil ||
 			bytes.Compare(buffer[:16], constants.Challenge) != 0 {
 			return NewPelError(constants.PelWrongChallenge)
@@ -204,10 +199,7 @@ func (layer *PktEncLayer) Handshake(isServer bool) error {
 		}
 
 		challenge := make([]byte, 16)
-		layer.conn.SetReadDeadline(
-			time.Now().Add(time.Duration(constants.HandshakeRWTimeout) * time.Second))
-		n, err = layer.Read(challenge)
-		layer.conn.SetReadDeadline(time.Time{})
+		n, err = layer.ReadTimeout(challenge, timeout)
 		if n != 16 || err != nil {
 			return NewPelError(constants.PelFailure)
 		}
@@ -279,11 +271,18 @@ func (layer *PktEncLayer) Read(p []byte) (int, error) {
 	return layer.read(p)
 }
 
+func (layer *PktEncLayer) ReadTimeout(p []byte, timeout time.Duration) (int, error) {
+	defer layer.conn.SetReadDeadline(time.Time{})
+	layer.conn.SetReadDeadline(time.Now().Add(timeout))
+	n, err := layer.Read(p)
+	return n, err
+}
+
 func (layer *PktEncLayer) read(p []byte) (int, error) {
 	firstblock := make([]byte, 16)
 	buffer := layer.readBuffer
 
-	if err := layer.readConnUntil(buffer, 16); err != nil {
+	if err := layer.readConnUntilFilled(buffer[:16]); err != nil {
 		return 0, err
 	}
 
@@ -298,7 +297,7 @@ func (layer *PktEncLayer) read(p []byte) (int, error) {
 		blkLength += 16 - (blkLength & 0x0F)
 	}
 
-	if err := layer.readConnUntil(buffer[16:], blkLength-16+20); err != nil {
+	if err := layer.readConnUntilFilled(buffer[16 : blkLength+20]); err != nil {
 		return 0, err
 	}
 
@@ -323,14 +322,24 @@ func (layer *PktEncLayer) read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (layer *PktEncLayer) readConnUntil(p []byte, fill int) error {
+func (layer *PktEncLayer) readConnUntilFilled(p []byte) error {
 	total := 0
+	fill := len(p)
 	for total < fill {
 		n, err := layer.conn.Read(p[total:fill])
 		if err != nil {
 			return err
 		}
 		total += n
+	}
+	return nil
+}
+
+func (layer *PktEncLayer) readConnUntilFilledTimeout(p []byte, timeout time.Duration) error {
+	defer layer.conn.SetReadDeadline(time.Time{})
+	layer.conn.SetReadDeadline(time.Now().Add(timeout))
+	if err := layer.readConnUntilFilled(p); err != nil {
+		return err
 	}
 	return nil
 }
