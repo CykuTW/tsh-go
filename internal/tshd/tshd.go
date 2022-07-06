@@ -82,6 +82,9 @@ func Run() {
 // it's safe to run with goroutine
 func handleGeneric(layer *pel.PktEncLayer) {
 	defer layer.Close()
+	defer func() {
+		recover()
+	}()
 	buffer := make([]byte, 1)
 	n, err := layer.Read(buffer)
 	if err != nil || n != 1 {
