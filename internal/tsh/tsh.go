@@ -70,10 +70,12 @@ func Run() {
 		addr := fmt.Sprintf(":%d", port)
 		ln, err := pel.Listen(addr, secret, false)
 		if err != nil {
+			fmt.Println("Address already in use.")
 			os.Exit(0)
 		}
 		fmt.Print("Waiting for the server to connect...")
 		layer, err := ln.Accept()
+		ln.Close()
 		if err != nil {
 			fmt.Print("\nPassword: ")
 			fmt.Scanln()
