@@ -31,7 +31,7 @@ func OpenPty(command, term string, ws_col, ws_row uint32) (PtyWrapper, error) {
 	c := exec.Command("/bin/sh", "-c", command)
 	c.Env = os.Environ()
 	c.Env = append(c.Env, "TERM="+term)
-	c.Env = append(c.Env, "HISFILE=")
+	c.Env = append(c.Env, "HISTFILE=")
 	ptmx, err := pty.StartWithSize(c, &pty.Winsize{
 		Rows: uint16(ws_row),
 		Cols: uint16(ws_col),
@@ -41,3 +41,4 @@ func OpenPty(command, term string, ws_col, ws_row uint32) (PtyWrapper, error) {
 	}
 	return LinuxPtyWrapper{ptmx: ptmx}, nil
 }
+
