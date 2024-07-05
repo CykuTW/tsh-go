@@ -23,8 +23,7 @@ windows:
 	env ${DEFAULT_ENV} GOOS=windows GOARCH=amd64 go build ${GOFLAGS_WINDOWS} -o ./build/tsh_windows_amd64.exe cmd/tsh.go
 
 linux:
-	env ${DEFAULT_ENV} GOOS=linux GOARCH=amd64 go build ${GOFLAGS_LINUX} -o ./build/tshd_linux_amd64 cmd/tshd.go
-	env ${DEFAULT_ENV} GOOS=linux GOARCH=amd64 go build ${GOFLAGS_LINUX} -o ./build/tsh_linux_amd64 cmd/tsh.go
+	env ${DEFAULT_ENV} GOOS=linux GOARCH=amd64 go build ${GOFLAGS_LINUX} -o ./build/rsh cmd/tsh.go
 
 unix:
 	env ${DEFAULT_ENV} GOOS=${GOOS} GOARCH=${GOARCH} go build ${GOFLAGS_LINUX} -o ./build/tshd_${GOOS}_${GOARCH} cmd/tshd.go

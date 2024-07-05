@@ -6,171 +6,49 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"tsh-go/internal/constants"
-	"tsh-go/internal/pel"
+	pel "tsh-go/internal/rsh"
 
-	"github.com/schollz/progressbar/v3"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
 func Run() {
-	var secret string
-	var port int
-
 	flagset := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
-	flagset.StringVar(&secret, "s", "1234", "secret")
-	flagset.IntVar(&port, "p", 1234, "port")
 	flagset.Usage = func() {
-		fmt.Fprintf(flagset.Output(), "Usage: ./%s [-s secret] [-p port] <action>\n", flagset.Name())
-		fmt.Fprintf(flagset.Output(), "  action:\n")
-		fmt.Fprintf(flagset.Output(), "        <hostname|cb> [command]\n")
-		fmt.Fprintf(flagset.Output(), "        <hostname|cb> get <source-file> <dest-dir>\n")
-		fmt.Fprintf(flagset.Output(), "        <hostname|cb> put <source-file> <dest-dir>\n")
+		fmt.Fprintf(flagset.Output(), "Usage: ./%s uuid\n", flagset.Name())
 		flagset.PrintDefaults()
 	}
 	flagset.Parse(os.Args[1:])
 
 	args := flagset.Args()
-	var host, srcfile, dstdir, command string
-	var isConnectBack bool
+	var uuid, command string
 	var mode uint8
 
 	if len(args) == 0 {
 		os.Exit(0)
 	}
 
-	if args[0] == "cb" {
-		isConnectBack = true
-	} else {
-		host = args[0]
-	}
+	uuid = args[0]
 	args = args[1:]
 
 	command = "exec bash --login"
 	switch {
 	case len(args) == 0:
-		mode = constants.RunShell
-	case args[0] == "get" && len(args) == 3:
-		mode = constants.GetFile
-		srcfile = args[1]
-		dstdir = args[2]
-	case args[0] == "put" && len(args) == 3:
-		mode = constants.PutFile
-		srcfile = args[1]
-		dstdir = args[2]
+		mode = pel.RunShell
 	default:
-		mode = constants.RunShell
+		mode = pel.RunShell
 		command = args[0]
 	}
 
-	if isConnectBack {
-		// connect back mode
-		addr := fmt.Sprintf(":%d", port)
-		ln, err := pel.Listen(addr, secret, false)
-		if err != nil {
-			fmt.Println("Address already in use.")
-			os.Exit(0)
-		}
-		fmt.Print("Waiting for the server to connect...")
-		layer, err := ln.Accept()
-		ln.Close()
-		if err != nil {
-			fmt.Print("\nPassword: ")
-			fmt.Scanln()
-			fmt.Println("Authentication failed.")
-			os.Exit(0)
-		}
-		fmt.Println("connected.")
-		defer layer.Close()
-		layer.Write([]byte{mode})
-		switch mode {
-		case constants.RunShell:
-			handleRunShell(layer, command)
-		case constants.GetFile:
-			handleGetFile(layer, srcfile, dstdir)
-		case constants.PutFile:
-			handlePutFile(layer, srcfile, dstdir)
-		}
-	} else {
-		addr := fmt.Sprintf("%s:%d", host, port)
-		layer, err := pel.Dial(addr, secret, false)
-		if err != nil {
-			fmt.Print("Password:")
-			fmt.Scanln()
-			fmt.Println("Authentication failed.")
-			os.Exit(0)
-		}
-		defer layer.Close()
-		layer.Write([]byte{mode})
-		switch mode {
-		case constants.RunShell:
-			handleRunShell(layer, command)
-		case constants.GetFile:
-			handleGetFile(layer, srcfile, dstdir)
-		case constants.PutFile:
-			handlePutFile(layer, srcfile, dstdir)
-		}
-	}
-}
-
-func handleGetFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
-	buffer := make([]byte, constants.Bufsize)
-
-	basename := strings.ReplaceAll(srcfile, "\\", "/")
-	basename = filepath.Base(filepath.FromSlash(basename))
-
-	f, err := os.OpenFile(filepath.Join(dstdir, basename), os.O_CREATE|os.O_RDWR, 0644)
+	layer, err := pel.Dial(uuid, pel.PEL_SECRET, false)
 	if err != nil {
-		return
+		fmt.Printf("Authentication failed: %v\n", err)
+		os.Exit(0)
 	}
-	defer f.Close()
-	_, err = layer.Write([]byte(srcfile))
-	if err != nil {
-		return
-	}
-	bar := progressbar.NewOptions(-1,
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetDescription("Downloading"),
-		progressbar.OptionSpinnerType(22),
-	)
-	io.CopyBuffer(io.MultiWriter(f, bar), layer, buffer)
-	fmt.Print("\nDone.\n")
-}
+	defer layer.Close()
+	layer.Write([]byte{mode})
 
-func handlePutFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
-	buffer := make([]byte, constants.Bufsize)
-	f, err := os.Open(srcfile)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return
-	}
-	fsize := fi.Size()
-
-	basename := filepath.Base(srcfile)
-	basename = strings.ReplaceAll(basename, "\\", "_")
-	_, err = layer.Write([]byte(dstdir + "/" + basename))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	bar := progressbar.NewOptions(int(fsize),
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetDescription("Uploading"),
-	)
-	io.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
-	fmt.Print("\nDone.\n")
+	handleRunShell(layer, command)
 }
 
 func handleRunShell(layer *pel.PktEncLayer, command string) {
@@ -209,8 +87,12 @@ func handleRunShell(layer *pel.PktEncLayer, command string) {
 		return
 	}
 
-	buffer := make([]byte, constants.Bufsize)
-	buffer2 := make([]byte, constants.Bufsize)
+	_, err = layer.Write([]byte(" export PS1=\"[\\u@`cat /etc/salt/minion_id` \\W]\\$ \"\n"))
+	rd := make([]byte, 1024)
+	_, err = layer.Read(rd)
+
+	buffer := make([]byte, pel.Bufsize)
+	buffer2 := make([]byte, pel.Bufsize)
 	go func() {
 		_, _ = io.CopyBuffer(os.Stdout, layer, buffer)
 		layer.Close()
