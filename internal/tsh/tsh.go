@@ -30,6 +30,7 @@ func Run() {
 
 	uuid = args[0]
 	args = args[1:]
+	use_ps1 := true
 
 	command = "exec bash --login"
 	switch {
@@ -38,6 +39,7 @@ func Run() {
 	default:
 		mode = pel.RunShell
 		command = args[0]
+		use_ps1 = false
 	}
 
 	layer, err := pel.Dial(uuid, pel.PEL_SECRET, false)
@@ -48,10 +50,10 @@ func Run() {
 	defer layer.Close()
 	layer.Write([]byte{mode})
 
-	handleRunShell(layer, command)
+	handleRunShell(layer, command, use_ps1)
 }
 
-func handleRunShell(layer *pel.PktEncLayer, command string) {
+func handleRunShell(layer *pel.PktEncLayer, command string, use_ps1 bool) {
 	oldState, err := terminal.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		return
@@ -87,15 +89,17 @@ func handleRunShell(layer *pel.PktEncLayer, command string) {
 		return
 	}
 
-	_, err = layer.Write([]byte(" export PS1=\"[\\u@`cat /etc/salt/minion_id` \\W]\\$ \"\n"))
-	rd := make([]byte, 1024)
-	_, err = layer.Read(rd)
+	if use_ps1 {
+		_, err = layer.Write([]byte(" export PS1=\"[\\u@`cat /etc/salt/minion_id` \\W]\\\\$ \"\n"))
+		rd := make([]byte, 1024)
+		_, err = layer.Read(rd)
+	}
 
 	buffer := make([]byte, pel.Bufsize)
 	buffer2 := make([]byte, pel.Bufsize)
 	go func() {
-		_, _ = io.CopyBuffer(os.Stdout, layer, buffer)
-		layer.Close()
+		_, _ = io.CopyBuffer(layer, os.Stdin, buffer2)
 	}()
-	_, _ = io.CopyBuffer(layer, os.Stdin, buffer2)
+	_, _ = io.CopyBuffer(os.Stdout, layer, buffer)
+	layer.Close()
 }
