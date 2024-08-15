@@ -80,12 +80,14 @@ func handleGetFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 
 	f, err := os.OpenFile(filepath.Join(dstdir, basename), os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return
+		fmt.Printf("创建文件失败: %v\n", err)
+		os.Exit(1)
 	}
 	defer f.Close()
 	_, err = layer.Write([]byte(srcfile))
 	if err != nil {
-		return
+		fmt.Printf("下载文件失败: %v\n", err)
+		os.Exit(1)
 	}
 	bar := progressbar.NewOptions(-1,
 		progressbar.OptionSetWidth(20),
@@ -95,20 +97,23 @@ func handleGetFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 		progressbar.OptionSetDescription("Downloading"),
 		progressbar.OptionSpinnerType(22),
 	)
-	io.CopyBuffer(io.MultiWriter(f, bar), layer, buffer)
-	fmt.Print("\nDone.\n")
+	bytes, err := io.CopyBuffer(io.MultiWriter(f, bar), layer, buffer)
+	fmt.Print("\n get %d bytes. err: %v\n", bytes, err)
+	os.Exit(0)
 }
 
 func handlePutFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 	buffer := make([]byte, pel.Bufsize)
 	f, err := os.Open(srcfile)
 	if err != nil {
-		return
+		fmt.Printf("原始文件读取失败: %v\n", err)
+		os.Exit(1)
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		return
+		fmt.Printf("原始文件读取失败: %v\n", err)
+		os.Exit(1)
 	}
 	fsize := fi.Size()
 
@@ -126,8 +131,8 @@ func handlePutFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 		progressbar.OptionShowCount(),
 		progressbar.OptionSetDescription("Uploading"),
 	)
-	io.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
-	fmt.Print("\nDone.\n")
+	bytes, err := io.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
+	fmt.Printf("\n send %d bytes. err: %v\n", bytes, err)
 }
 
 func handleRunShell(layer *pel.PktEncLayer, command string, use_ps1 bool) {

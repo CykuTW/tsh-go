@@ -14,12 +14,12 @@ import (
 	"time"
 )
 
-var PEL_SECRET = "1234"
+var PEL_SECRET = "12345678"
 
-var RATHOLE_ADDR_PORT = "127.0.0.1:5220"
+var RATHOLE_ADDR_PORT = "222.187.225.57:12085"
 
 const (
-	Bufsize = 4096
+	Bufsize = 1024000
 
 	GetFile  = 1
 	PutFile  = 2
