@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
+	"sync"
 	pel "tsh-go/internal/rsh"
 
 	"github.com/schollz/progressbar/v3"
@@ -97,9 +97,21 @@ func handleGetFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 		progressbar.OptionSetDescription("Downloading"),
 		progressbar.OptionSpinnerType(22),
 	)
+
+	rd := make([]byte, 1024)
+	_, err = layer.Read(rd)
+
 	bytes, err := io.CopyBuffer(io.MultiWriter(f, bar), layer, buffer)
-	fmt.Print("\n get %d bytes. err: %v\n", bytes, err)
-	os.Exit(0)
+	if strings.Contains(string(rd), "error:") {
+		fmt.Printf("\n Recv %s\n", rd)
+	} else if err == nil {
+		fmt.Printf("\n Recv Success: %d bytes\n", bytes)
+		os.Exit(0)
+	} else {
+		fmt.Printf("\n err: %v", err)
+	}
+
+	layer.Close()
 }
 
 func handlePutFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
@@ -131,8 +143,31 @@ func handlePutFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 		progressbar.OptionShowCount(),
 		progressbar.OptionSetDescription("Uploading"),
 	)
-	bytes, err := io.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
-	fmt.Printf("\n send %d bytes. err: %v\n", bytes, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	rd := make([]byte, 1024)
+	_, err = layer.Read(rd)
+
+	go func(done func()) {
+		defer done()
+
+		bytes, err := io.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
+		if strings.Contains(string(rd), "error:") {
+			fmt.Printf("\n Send %s\n", rd)
+		} else if err == nil {
+			fmt.Printf("\n Send Success: %d bytes\n", bytes)
+			os.Exit(0)
+		} else {
+			fmt.Printf("\n err: %v", err)
+		}
+		layer.Close()
+	}(wg.Done)
+
+	io.CopyBuffer(os.Stdout, layer, rd)
+	layer.Close()
+	wg.Wait()
 }
 
 func handleRunShell(layer *pel.PktEncLayer, command string, use_ps1 bool) {

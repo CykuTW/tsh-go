@@ -129,13 +129,13 @@ func (ln *PktEncLayerListener) Accept() (l *PktEncLayer, err error) {
 func Sock5HandShake(uuid string) (*net.TCPConn, error) {
 	tcpaddr, err := net.ResolveTCPAddr("tcp", RATHOLE_ADDR_PORT)
 	if err != nil {
-		fmt.Printf("connect to rathole failed : %v.\n", err)
+		fmt.Printf("rathole服务地址解析失败 : %v.\n", err)
 		return nil, err
 	}
 
 	conn, err := net.DialTCP("tcp", nil, tcpaddr)
 	if err != nil {
-		fmt.Printf("connect to rathole failed : %v.\n", err)
+		fmt.Printf("rathole连接失败: %v.\n", err)
 		return nil, err
 	}
 
@@ -145,7 +145,7 @@ func Sock5HandShake(uuid string) (*net.TCPConn, error) {
 	var buf [1024]byte
 	_, err = conn.Read(buf[:])
 	if err != nil {
-		fmt.Printf("read from client failed 0, err: %v\n", err)
+		fmt.Printf("rathole服务未响应, err: %v\n", err)
 		return nil, err
 	}
 
@@ -161,7 +161,7 @@ func Sock5HandShake(uuid string) (*net.TCPConn, error) {
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	_, err = conn.Read(buf[:])
 	if err != nil {
-		fmt.Printf("read from client failed 1, err: %v\n", err)
+		fmt.Printf("边缘设备的rsh不存在, err: %v\n", err)
 		return nil, err
 	}
 
@@ -170,7 +170,7 @@ func Sock5HandShake(uuid string) (*net.TCPConn, error) {
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	_, err = conn.Read(buf[:])
 	if err != nil {
-		fmt.Printf("read from client failed 2, err: %v\n", err)
+		fmt.Printf("未知错误, err: %v\n", err)
 		return nil, err
 	}
 
