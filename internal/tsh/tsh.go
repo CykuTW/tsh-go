@@ -4,10 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
+	"strconv"
 	"sync"
+	"time"
 	pel "tsh-go/internal/rsh"
 
 	"github.com/schollz/progressbar/v3"
@@ -20,6 +23,8 @@ func Run() {
 		fmt.Fprintf(flagset.Output(), "Usage: ./%s uuid\n", flagset.Name())
 		fmt.Fprintf(flagset.Output(), "        uuid get <source-file> <dest-dir>\n")
 		fmt.Fprintf(flagset.Output(), "        uuid put <source-file> <dest-dir>\n")
+		fmt.Fprintf(flagset.Output(), "        uuids shell cmds timeout\n")
+		fmt.Fprintf(flagset.Output(), "        uuids script a.sh timeout\n")
 		flagset.PrintDefaults()
 	}
 	flagset.Parse(os.Args[1:])
@@ -48,6 +53,20 @@ func Run() {
 		mode = pel.PutFile
 		srcfile = args[1]
 		dstdir = args[2]
+	case args[0] == "script" && len(args) == 3:
+		timeout, _ := strconv.Atoi(args[2])
+		if timeout <= 0 {
+			timeout = 60
+		}
+		handleScripts(uuid, args[1], timeout)
+		return
+	case args[0] == "shell" && len(args) == 3:
+		timeout, _ := strconv.Atoi(args[2])
+		if timeout <= 0 {
+			timeout = 60
+		}
+		handleShell(uuid, args[1], timeout)
+		return
 	default:
 		mode = pel.RunShell
 		command = args[0]
@@ -70,6 +89,244 @@ func Run() {
 	case pel.PutFile:
 		handlePutFile(layer, srcfile, dstdir)
 	}
+}
+
+var STATUS_SPLIT = "\n----------------------------\n"
+var STATUS_DISCONNECT = "DisConnect"
+var STATUS_FAILED = "Failed"
+var STATUS_SUCCESS = "Success"
+var STATUS_TIMEOUT = "Timeout"
+
+func do_script(uuid string, script string, content *string, ch chan string, timeout int) {
+	done := make(chan string, 1)
+	var result string
+	go func() {
+		// 上传脚本
+		layer_put, err := pel.Dial(uuid, pel.PEL_SECRET, false)
+		if err != nil {
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_DISCONNECT, STATUS_SPLIT)
+			done <- result
+			return
+		}
+		defer layer_put.Close()
+
+		layer_put.Write([]byte{pel.PutFile})
+
+		basename := filepath.Base(script)
+		destfile := "/tmp/" + basename
+		_, err = layer_put.Write([]byte(destfile))
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+		rd := make([]byte, 1024)
+		_, err = layer_put.Read(rd)
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+		layer_put.Write([]byte(*content))
+
+		// 执行脚本
+		var cmds string
+		if strings.Contains(basename, ".py") {
+			cmds = fmt.Sprintf("python3 %s; rm %s", destfile, destfile)
+		} else {
+			cmds = fmt.Sprintf("sh %s; rm %s", destfile, destfile)
+		}
+		
+		layer, err := pel.Dial(uuid, pel.PEL_SECRET, false)
+		if err != nil {
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_DISCONNECT, STATUS_SPLIT)
+			done <- result
+			return
+		}
+		defer layer.Close()
+
+		layer.Write([]byte{pel.RunShell})
+		
+		_, err = layer.Write([]byte("vt100"))
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+
+		ws_col, ws_row, _ := terminal.GetSize(int(os.Stdout.Fd()))
+		ws := make([]byte, 4)
+		ws[0] = byte((ws_row >> 8) & 0xFF)
+		ws[1] = byte((ws_row) & 0xFF)
+		ws[2] = byte((ws_col >> 8) & 0xFF)
+		ws[3] = byte((ws_col) & 0xFF)
+		_, err = layer.Write(ws)
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+
+		_, err = layer.Write([]byte(cmds))
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+
+		buffer := make([]byte, pel.Bufsize)
+		for {
+			n, err := layer.Read(buffer)
+			result += string(buffer[0:n])
+			if err != nil {
+				break
+			}
+		}
+
+		result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_SUCCESS, STATUS_SPLIT)
+		done <- result
+	}()
+
+	select {
+	case result := <-done:
+		ch <- result
+		return
+	case <-time.After(time.Second * time.Duration(timeout)):
+		var tmp = result
+		tmp += fmt.Sprintf("\nuuid:%s 任务执行结果:%s%s", uuid, STATUS_TIMEOUT, STATUS_SPLIT)
+		ch <- tmp
+		return
+	}
+}
+
+func handleScripts(uuids string, script string, timeout int) {
+	uuid_list := strings.Split(uuids, ",")
+	length := len(uuid_list)
+	if length > 100 {
+		length = 100
+	}
+
+	f, err := os.Open(script)
+	if err != nil {
+		fmt.Printf("原始文件读取失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	bytes, err := ioutil.ReadFile(script)
+	if err != nil {
+		fmt.Printf("原始文件读取失败: %v\n", err)
+		os.Exit(1)
+	}
+	content := string(bytes)
+
+	var responseChannel = make(chan string, length)
+
+	for _, uuid := range uuid_list {
+		go do_script(uuid, script, &content, responseChannel, timeout)
+	}
+
+	for i := 0; i < length; i++ {
+		data := <- responseChannel
+		fmt.Println(data)
+	}
+
+	time.Sleep(1 * time.Second)
+}
+
+func shell(uuid string, cmds string, ch chan string, timeout int) {
+	done := make(chan string, 1)
+	var result string
+	go func() {
+		layer, err := pel.Dial(uuid, pel.PEL_SECRET, false)
+		if err != nil {
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_DISCONNECT, STATUS_SPLIT)
+			done <- result
+			return
+		}
+		defer layer.Close()
+
+		layer.Write([]byte{pel.RunShell})
+		
+		_, err = layer.Write([]byte("vt100"))
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+
+		ws_col, ws_row, _ := terminal.GetSize(int(os.Stdout.Fd()))
+		ws := make([]byte, 4)
+		ws[0] = byte((ws_row >> 8) & 0xFF)
+		ws[1] = byte((ws_row) & 0xFF)
+		ws[2] = byte((ws_col >> 8) & 0xFF)
+		ws[3] = byte((ws_col) & 0xFF)
+		_, err = layer.Write(ws)
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+
+		_, err = layer.Write([]byte(cmds))
+		if err != nil {
+			result += fmt.Sprintf("error: %v\n", err)
+			result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+			done <- result
+			return
+		}
+
+		buffer := make([]byte, pel.Bufsize)
+		for {
+			n, err := layer.Read(buffer)
+			result += string(buffer[0:n])
+			if err != nil {
+				break
+			}
+		}
+
+		result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_SUCCESS, STATUS_SPLIT)
+		done <- result
+	}()
+
+	select {
+	case result := <-done:
+		ch <- result
+		return
+	case <-time.After(time.Second * time.Duration(timeout)):
+		var tmp = result
+		tmp += fmt.Sprintf("\nuuid:%s 任务执行结果:%s%s", uuid, STATUS_TIMEOUT, STATUS_SPLIT)
+		ch <- tmp
+		return
+	}
+}
+
+func handleShell(uuids string, cmds string, timeout int) {
+	uuid_list := strings.Split(uuids, ",")
+	length := len(uuid_list)
+	if length > 100 {
+		length = 100
+	}
+
+	var responseChannel = make(chan string, length)
+
+	for _, uuid := range uuid_list {
+		go shell(uuid, cmds, responseChannel, timeout)
+	}
+
+	for i := 0; i < length; i++ {
+		data := <- responseChannel
+		fmt.Println(data)
+	}
+
+	time.Sleep(1 * time.Second)
 }
 
 func handleGetFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
