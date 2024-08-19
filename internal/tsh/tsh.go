@@ -41,7 +41,7 @@ func Run() {
 	args = args[1:]
 	use_ps1 := true
 
-	command = "exec bash --login"
+	command = "exec sh"
 	switch {
 	case len(args) == 0:
 		mode = pel.RunShell
