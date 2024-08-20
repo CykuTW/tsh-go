@@ -168,7 +168,7 @@ func do_script(uuid string, script string, content *string, ch chan string, time
 		for i := 0; i < 5; i++ {
 			var cmds string
 			if strings.Contains(basename, ".py") {
-				cmds = fmt.Sprintf(" python3 %s", destfile)
+				cmds = fmt.Sprintf(" python %s", destfile)
 			} else {
 				cmds = fmt.Sprintf(" sh %s", destfile)
 			}
