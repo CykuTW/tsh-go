@@ -150,21 +150,13 @@ func do_script(uuid string, script string, content *string, ch chan string, time
 				return
 			}
 		}
-		// n, err := layer_put.Write([]byte(*content))
-		// fmt.Printf("error: %v, send: %d\n", err, n)
-		// if err != nil || n < len(*content) {
-		// 	result += fmt.Sprintf("error: %v, send: %d\n", err, n)
-		// 	result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
-		// 	done <- result
-		// 	return
-		// }
 
 		// 执行脚本
 		var cmds string
 		if strings.Contains(basename, ".py") {
-			cmds = fmt.Sprintf("python3 %s; rm %s", destfile, destfile)
+			cmds = fmt.Sprintf(" python3 %s", destfile)
 		} else {
-			cmds = fmt.Sprintf("sh %s; rm %s", destfile, destfile)
+			cmds = fmt.Sprintf(" sh %s", destfile)
 		}
 		
 		layer, err := pel.Dial(uuid, pel.PEL_SECRET, false)
