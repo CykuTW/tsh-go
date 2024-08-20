@@ -96,6 +96,7 @@ var STATUS_DISCONNECT = "DisConnect"
 var STATUS_FAILED = "Failed"
 var STATUS_SUCCESS = "Success"
 var STATUS_TIMEOUT = "Timeout"
+var SEND_BUFFER = 4096
 
 func do_script(uuid string, script string, content *string, ch chan string, timeout int) {
 	done := make(chan string, 1)
@@ -129,7 +130,34 @@ func do_script(uuid string, script string, content *string, ch chan string, time
 			done <- result
 			return
 		}
-		layer_put.Write([]byte(*content))
+
+		length := len(*content)
+		send_time := (length + 4095) / 4096
+		file_buffer := []byte(*content)
+		for i := 0; i < send_time; i++ {
+			var n int
+			var err error
+			if i == send_time - 1 {
+				n, err = layer_put.Write(file_buffer[i*4096:])
+			} else {
+				n, err = layer_put.Write(file_buffer[i*4096:i*4096+4096])
+			}
+			
+			if err != nil {
+				result += fmt.Sprintf("error: %v, send: %d\n", err, n)
+				result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+				done <- result
+				return
+			}
+		}
+		// n, err := layer_put.Write([]byte(*content))
+		// fmt.Printf("error: %v, send: %d\n", err, n)
+		// if err != nil || n < len(*content) {
+		// 	result += fmt.Sprintf("error: %v, send: %d\n", err, n)
+		// 	result += fmt.Sprintf("uuid:%s 任务执行结果:%s%s", uuid, STATUS_FAILED, STATUS_SPLIT)
+		// 	done <- result
+		// 	return
+		// }
 
 		// 执行脚本
 		var cmds string
