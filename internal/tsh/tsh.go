@@ -230,6 +230,7 @@ func do_script(uuid string, script string, content *string, ch chan string, time
 			} else {
 				empty_time += 1
 				result += fmt.Sprintf("empty result, retry %d...\n", empty_time)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 		}
