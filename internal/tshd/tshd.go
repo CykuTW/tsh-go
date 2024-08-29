@@ -3,7 +3,6 @@ package tshd
 import (
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 	"tsh-go/internal/constants"
 	"tsh-go/internal/pel"
 	"tsh-go/internal/pty"
+	"tsh-go/internal/utils"
 )
 
 func RunInBackground() {
@@ -112,7 +112,7 @@ func handleGetFile(layer *pel.PktEncLayer) {
 		return
 	}
 	defer f.Close()
-	io.CopyBuffer(layer, f, buffer)
+	utils.CopyBuffer(layer, f, buffer)
 }
 
 func handlePutFile(layer *pel.PktEncLayer) {
@@ -127,7 +127,7 @@ func handlePutFile(layer *pel.PktEncLayer) {
 		return
 	}
 	defer f.Close()
-	io.CopyBuffer(f, layer, buffer)
+	utils.CopyBuffer(f, layer, buffer)
 	layer.Close()
 }
 
@@ -160,8 +160,8 @@ func handleRunShell(layer *pel.PktEncLayer) {
 	}
 	defer tp.Close()
 	go func() {
-		io.CopyBuffer(tp.StdIn(), layer, buffer)
+		utils.CopyBuffer(tp.StdIn(), layer, buffer)
 		tp.Close()
 	}()
-	io.CopyBuffer(layer, tp.StdOut(), buffer2)
+	utils.CopyBuffer(layer, tp.StdOut(), buffer2)
 }

@@ -10,6 +10,7 @@ import (
 
 	"tsh-go/internal/constants"
 	"tsh-go/internal/pel"
+	"tsh-go/internal/utils"
 
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/crypto/ssh/terminal"
@@ -138,7 +139,7 @@ func handleGetFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 		progressbar.OptionSetDescription("Downloading"),
 		progressbar.OptionSpinnerType(22),
 	)
-	io.CopyBuffer(io.MultiWriter(f, bar), layer, buffer)
+	utils.CopyBuffer(io.MultiWriter(f, bar), layer, buffer)
 	fmt.Print("\nDone.\n")
 }
 
@@ -169,7 +170,7 @@ func handlePutFile(layer *pel.PktEncLayer, srcfile, dstdir string) {
 		progressbar.OptionShowCount(),
 		progressbar.OptionSetDescription("Uploading"),
 	)
-	io.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
+	utils.CopyBuffer(io.MultiWriter(layer, bar), f, buffer)
 	fmt.Print("\nDone.\n")
 }
 
@@ -212,8 +213,8 @@ func handleRunShell(layer *pel.PktEncLayer, command string) {
 	buffer := make([]byte, constants.Bufsize)
 	buffer2 := make([]byte, constants.Bufsize)
 	go func() {
-		_, _ = io.CopyBuffer(os.Stdout, layer, buffer)
+		_, _ = utils.CopyBuffer(os.Stdout, layer, buffer)
 		layer.Close()
 	}()
-	_, _ = io.CopyBuffer(layer, os.Stdin, buffer2)
+	_, _ = utils.CopyBuffer(layer, os.Stdin, buffer2)
 }
